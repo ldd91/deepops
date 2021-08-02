@@ -1,23 +1,33 @@
-# 平台对异构设备的支持
-本项目支持对异构设备的支持，需要平台适配不同的插件。
-Kubernetes 支持对节点上的 AMD 和 NVIDIA GPU （图形处理单元）进行管理。
-Kubernetes 实现了设备插件（Device Plugins） 以允许 Pod 访问类似 GPU 这类特殊的硬件功能特性。
-作为集群管理员，你要在节点上安装来自对应硬件厂商的 GPU 驱动程序，并运行来自 GPU 厂商的对应的设备插件。
-当以上条件满足时，Kubernetes 将暴露 amd.com/gpu 或 nvidia.com/gpu 为 可调度的资源。
-异构设备的管理机制，得益于平台的机制，平台允许用户自定义资源名称，用户可以定义包括 RDMA、FPGA、AMD GPU 等等设备。
-你可以通过请求 <vendor>.com/gpu 资源来使用 GPU 设备，就像你为 CPU 和内存所做的那样。
-部署 AMD GPU 设备插件
-官方的 AMD GPU 设备插件 有以下要求：
-Kubernetes 节点必须预先安装 AMD GPU 的 Linux 驱动。
-如果你的集群已经启动并且满足上述要求的话，可以这样部署 AMD 设备插件：
-kubectl create -f https://raw.githubusercontent.com/RadeonOpenCompute/k8s-device-plugin/r1.10/k8s-ds-amdgpu-dp.yaml
+# 设备插件
+Kubernetes 提供了一个设备插件框架，你可以用它来将系统硬件资源发布到 Kubelet。 供应商可以实现设备插件，由你手动部署或作为 DaemonSet 来部署，而不必定制 Kubernetes 本身的代码。目标设备包括 GPU、高性能 NIC、FPGA、 InfiniBand 适配器以及其他类似的、可能需要特定于供应商的初始化和设置的计算资源。
 
-## 部署 NVIDIA GPU 设备插件
-官方的 NVIDIA GPU 设备插件 有以下要求:
-Kubernetes 的节点必须预先安装了 NVIDIA 驱动
-Kubernetes 的节点必须预先安装 nvidia-docker 2.0
-Docker 的默认运行时必须设置为 nvidia-container-runtime，而不是 runc
-NVIDIA 驱动版本 ~= 384.81
-Kubernetes 版本 >= 1.10
-准备 GPU 节点
-具体参考 https://github.com/NVIDIA/k8s-device-plugin
+注册设备插件 kubelet 提供了一个 Registration 的 gRPC 服务：
+
+service Registration { rpc Register(RegisterRequest) returns (Empty) {} }
+
+设备插件可以通过此 gRPC 服务在 kubelet 进行注册。在注册期间，设备插件需要发送下面几样内容：
+设备插件的 Unix 套接字。
+设备插件的 API 版本。
+ResourceName。
+这里 ResourceName 需要遵循扩展资源命名方案， 类似于 vendor-domain/resourcetype。（比如 NVIDIA GPU 是 nvidia.com/gpu。） 成功注册后，设备插件就向 kubelet 发送它所管理的设备列表，然后 kubelet 负责将这些资源发布到 API 服务器，作为 kubelet 节点状态更新的一部分。
+比如，设备插件在 kubelet 中注册了 hardware-vendor.example/foo 并报告了节点上的两个运行状况良好的设备后，节点状态将更新以通告该节点已安装 2 个 "Foo" 设备并且是可用的。
+
+然后，用户可以请求设备作为 Pod 规范的一部分， 参见 Container。 请求扩展资源类似于管理请求和限制的方式， 其他资源。 扩展资源仅可作为整数资源使用，并且不能被过量使用设备不能在容器之间共享。
+
+## 处理 kubelet 重启
+
+设备插件应能监测到 kubelet 重启，并且向新的 kubelet 实例来重新注册自己。 新的 kubelet 实例启动时会删除 /var/lib/kubelet/device-plugins 下所有已经存在的 Unix 套接字。 设备插件需要能够监控到它的 Unix 套接字被删除，并且当发生此类事件时重新注册自己。
+
+设备插件部署 你可以将你的设备插件作为节点操作系统的软件包来部署、作为 DaemonSet 来部署或者手动部署。 规范目录 /var/lib/kubelet/device-plugins 是需要特权访问的， 所以设备插件必须要在被授权的安全的上下文中运行。 如果你将设备插件部署为 DaemonSet，/var/lib/kubelet/device-plugins 目录必须要在插件的 PodSpec 中声明作为 卷（Volume） 被挂载到插件中。 如果你选择 DaemonSet 方法，你可以通过 Kubernetes 进行以下操作： 将设备插件的 Pod 放置在节点上，在出现故障后重新启动守护进程 Pod，来进行自动升级。
+
+## 异构设备的支持
+异构设备的管理机制，得益于平台的机制，平台允许用户自定义资源名称，用户可以定义包括 RDMA、FPGA、AMD GPU 等等设备。除了自定义资源平台还提供了设备管理插件框架允许第三方设备提供商以外置的方式对设备进行全生命周期的管理，设备管理插件框架建立 平台与不同的硬件设备之间的桥梁。
+
+它一方面负责设备信息的上报到 平台，另一方面负责设备的调度选择。 对于每一个硬件设备，都需要它所对应的插件进行管理，这些插件以客户端的身份通过 GRPC 的方式对节点资源管理器中的设备插件管理器进行连接，并且将自己监听的 api 的版本号和设备名上报给每个节点的节点资源管理器。资源管理器会将信息存储在平台的数据库中，当不同的计算任务请求到达平台的控制中心时候，调度器根据计算的特点为任务选择不同的计算资源，例如用户声明了４个GPU，则任务只会调度到满足条件的GPU节点上；
+
+## API 兼容性
+之前版本控制方案要求设备插件的 API 版本与 Kubelet 的版本完全匹配。 自从此特性在 v1.12 中进阶为 Beta 后，这不再是硬性要求。 API 是版本化的，并且自此特性进阶 Beta 后一直表现稳定。 因此，kubelet 升级应该是无缝的，但在稳定之前 API 仍然可能会有变更，还不能保证升级不会中断。
+
+说明： 尽管 Kubernetes 的设备管理器（Device Manager）组件是正式发布的特性， 但设备插件 API 还不稳定。有关设备插件 API 和版本兼容性的信息， 请参阅设备插件 API 版本。
+
+作为一个项目，Kubernetes 建议设备插件开发者： 注意未来版本中设备插件 API 的变更。 支持多个版本的设备插件 API，以实现向后/向前兼容性。 若在需要升级到具有较新设备插件 API 版本的某个 Kubernetes 版本的节点上运行这些设备插件， 请在升级这些节点之前先升级设备插件以支持这两个版本。 采用该方法将确保升级期间设备分配的连续运行。
