@@ -4,7 +4,7 @@ Kubernetes 支持对节点上的 AMD 和 NVIDIA GPU （图形处理单元）进�
 Kubernetes 实现了设备插件（Device Plugins） 以允许 Pod 访问类似 GPU 这类特殊的硬件功能特性。
 作为集群管理员，你要在节点上安装来自对应硬件厂商的 GPU 驱动程序，并运行来自 GPU 厂商的对应的设备插件。
 当以上条件满足时，Kubernetes 将暴露 amd.com/gpu 或 nvidia.com/gpu 为 可调度的资源。
-异构设备的管理机制，得益于平台的机制，平台充许用户自定义资源名称，用户可以定义包括 RDMA、FPGA、AMDGPU等等设备
+异构设备的管理机制，得益于平台的机制，平台允许用户自定义资源名称，用户可以定义包括 RDMA、FPGA、AMD GPU 等等设备。
 你可以通过请求 <vendor>.com/gpu 资源来使用 GPU 设备，就像你为 CPU 和内存所做的那样。
 部署 AMD GPU 设备插件
 官方的 AMD GPU 设备插件 有以下要求：
